@@ -2,8 +2,19 @@
 
 This proposal is an early design sketch by Chrome to describe the problem below and solicit feedback on the proposed solution. It has not been approved to ship in Chrome.
 
-## Participate
-- https://github.com/explainers-by-googlers/canvas-noise-on-readbacks/issues
+### Authors
+
+-   [Tom Van Goethem](https://github.com/tomvangoethem)
+
+### Contributors
+
+-   [Antonio Sartori](https://github.com/antosart)
+-   [Enrico Bacis](https://github.com/enricobacis)
+-   [Zainab Rizvi](https://github.com/zainabaq)
+
+### Participate
+
+-   https://github.com/explainers-by-googlers/canvas-noise-on-readbacks/issues
 
 ## Introduction
 
@@ -90,3 +101,13 @@ If it’s not possible to switch to CPU rendering, please [file a bug](https://i
 The goal of canvas noising is to reduce information available through the Canvas API that can be used to re-identify the user across sites.
 
 The per-partition token should be considered site data, and thus should be removed whenever the user deletes data for a particular site. This prevents the token from being abused as a persistent identifier.
+
+## Acknowledgements
+
+Many thanks for valuable feedback and advice from:
+
+-   Artur Janc
+-   Brian Lefler
+-   John Kim
+-   Mike Taylor
+-   Mike West
