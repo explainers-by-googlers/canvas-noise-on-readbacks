@@ -1,177 +1,92 @@
-# Explainer for the TODO API
+# Explainer for adding noise to canvas readbacks
 
-**Instructions for the explainer author: Search for "todo" in this repository and update all the
-instances as appropriate. For the instances in `index.bs`, update the repository name, but you can
-leave the rest until you start the specification. Then delete the TODOs and this block of text.**
-
-This proposal is an early design sketch by [TODO: team] to describe the problem below and solicit
-feedback on the proposed solution. It has not been approved to ship in Chrome.
-
-TODO: Fill in the whole explainer template below using https://tag.w3.org/explainers/ as a
-reference. Look for [brackets].
-
-## Proponents
-
-- [Proponent team 1]
-- [Proponent team 2]
-- [etc.]
+This proposal is an early design sketch by Chrome to describe the problem below and solicit feedback on the proposed solution. It has not been approved to ship in Chrome.
 
 ## Participate
-- https://github.com/explainers-by-googlers/[your-repository-name]/issues
-- [Discussion forum]
-
-## Table of Contents [if the explainer is longer than one printed page]
-
-<!-- Update this table of contents by running `npx doctoc README.md` -->
-<!-- START doctoc generated TOC please keep comment here to allow auto update -->
-<!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
-
-- [Introduction](#introduction)
-- [Goals](#goals)
-- [Non-goals](#non-goals)
-- [User research](#user-research)
-- [Use cases](#use-cases)
-  - [Use case 1](#use-case-1)
-  - [Use case 2](#use-case-2)
-- [[Potential Solution]](#potential-solution)
-  - [How this solution would solve the use cases](#how-this-solution-would-solve-the-use-cases)
-    - [Use case 1](#use-case-1-1)
-    - [Use case 2](#use-case-2-1)
-- [Detailed design discussion](#detailed-design-discussion)
-  - [[Tricky design choice #1]](#tricky-design-choice-1)
-  - [[Tricky design choice 2]](#tricky-design-choice-2)
-- [Considered alternatives](#considered-alternatives)
-  - [[Alternative 1]](#alternative-1)
-  - [[Alternative 2]](#alternative-2)
-- [Stakeholder Feedback / Opposition](#stakeholder-feedback--opposition)
-- [References & acknowledgements](#references--acknowledgements)
-
-<!-- END doctoc generated TOC please keep comment here to allow auto update -->
+- https://github.com/explainers-by-googlers/canvas-noise-on-readbacks/issues
 
 ## Introduction
 
-[The "executive summary" or "abstract".
-Explain in a few sentences what the goals of the project are,
-and a brief overview of how the solution works.
-This should be no more than 1-2 paragraphs.]
+The canvas APIs allow websites to draw shapes and forms on a canvas and read back the rendered image. However, the browser's rendering process leaks details about the GPU's properties. The goal of adding noise to canvas readbacks is to prevent scripts from easily obtaining identifying information that can be used to re-identify a browser across contexts.
 
-## Goals
+## Goals:
 
-[What is the **end-user need** which this project aims to address? Make this section short, and
-elaborate in the Use cases section.]
+* Prevent identifying information from being easily extracted from GPU-rendered canvases.
+* Improve user's privacy by aligning the exposed information with other data partitioning practices in the Web Platform.
+* Minimize the impact, both in terms of performance and breakage, for applications that intensively use `<canvas>` elements by only intervening when necessary.
+* Ensure that the noise added to canvas readbacks is applied every time that the raw pixels of the canvas are exposed to the website.
 
-## Non-goals
+## Non-goals:
 
-[If there are "adjacent" goals which may appear to be in scope but aren't,
-enumerate them here. This section may be fleshed out as your design progresses and you encounter necessary technical and other trade-offs.]
+* This document does not propose any changes to the way that operations on the canvas are executed, and only discusses noise that is added upon readback.
+* Applications that never read back the contents of the canvas will not be intervened upon.
 
-## User research
+## Overview
+Small changes to the RGBA pixel values of the canvas are made whenever the contents of a canvas are read out, and the GPU was used to render contents on that canvas. While CPU rendering can - at least in theory - be implemented by browser vendors in a deterministic way that doesn't leak much information about the user's device, GPU rendering will have slightly different behavior for many operations depending on drivers and the specifications of the device. As a result, GPU rendering is more likely to end up leaking information about the user’s device. Initially, noise might be added when one of the following functions is called:
 
-[If any user research has been conducted to inform your design choices,
-discuss the process and findings. User research should be more common than it is.]
+* HTMLCanvasElement.toDataURL
+* HTMLCanvasElement.toBlob
+* OffscreenCanvas.convertToBlob
+* CanvasRenderingContext2D.getImageData
 
-## Use cases
+Additionally, noise might be added when the contents of the canvas data are transferred to another host (e.g. a MediaStream) that would allow reading out those contents.
 
-[Describe in detail what problems end-users are facing, which this project is trying to solve. A
-common mistake in this section is to take a web developer's or server operator's perspective, which
-makes reviewers worry that the proposal will violate [RFC 8890, The Internet is for End
-Users](https://www.rfc-editor.org/rfc/rfc8890).]
+The noise that is added is fairly small, in the range of -3 to 3, making the noise visually unnoticeable in most cases. Furthermore, the noise that is added to a specific canvas is deterministic and depends on the contents of the canvas and a seed derived from a per-session random token and the context the canvas is included in. This context is based on the origin of the embedding document as well as that of the top-level document, and follows state partitioning properties.
 
-### Use case 1
+Adding noise to canvas readbacks is most helpful in browsing modes where the user explicitly or implicitly signaled they care most about their privacy, for instance in Incognito mode.
 
-### Use case 2
+To reduce any potential UX breakage caused by changing pixel values, we make use of heuristics to determine whether noise should be applied. These heuristics target canvas operations currently used to extract information and will likely change over time.
 
-<!-- In your initial explainer, you shouldn't be attached or appear attached to any of the potential
-solutions you describe below this. -->
+## Noising algorithm
 
-## [Potential Solution]
+At a high level, the algorithm for adding noise to a canvas readback is implemented according to the following pseudo-code:
 
-[For each related element of the proposed solution - be it an additional JS method, a new object, a new element, a new concept etc., create a section which briefly describes it.]
+```python
+# For each partition a different session-bound random value is assigned
+TOKENS = map(PARTITION -> TOKEN)
 
-```js
-// Provide example code - not IDL - demonstrating the design of the feature.
+for (x, y) in canvas:
+  r, g, b, a = get_pixel_at(x, y)
+  pixel_hash = hash_init(TOKENS[PARTITION])
 
-// If this API can be used on its own to address a user need,
-// link it back to one of the scenarios in the goals section.
+  # Each pixel is determined by their RGBA channels and their (x, y) coordinates
+  r, g, b, a, x, y = pixel
 
-// If you need to show how to get the feature set up
-// (initialized, or using permissions, etc.), include that too.
+  # The RGBA values of the current pixel are used as a new seed for the rolling hash
+  rolling_hash.update(r, g, b, a)
+
+  # Determine the (x,y)-offset for the other pixel that will influence the noise.
+  # The location is determined based on the token, partition, and RGBA values of the
+  # current pixel. These offsets are in the range of -10 to 10.
+  otherX, otherY = determine_offset(pixel_hash)
+
+  # Get the RGBA values for the other pixel, and use them to update the rolling hash.
+  otherR, otherG, otherB, otherA = get_pixel_at(otherX, otherY)
+  rolling_hash.update(otherR, otherG, otherB, otherA)
+
+  # Add noise deltas to the RGBA channels of the current pixel, clamped to [0, 255].
+  dR, dG, dB, dA = get_noise_deltas(pixel_hash)
+  noised_canvas[x][y] = [clamp(r + dR), clamp(g + dG), clamp(b + dB), clamp(a + dA)]
+
+return noised_canvas
 ```
 
-[Where necessary, provide links to longer explanations of the relevant pre-existing concepts and API.
-If there is no suitable external documentation, you might like to provide supplementary information as an appendix in this document, and provide an internal link where appropriate.]
+For a single pixel, the noise that is added is determined by the following factors:
 
-[If this is already specced, link to the relevant section of the spec.]
+* The context the related canvas is included in. The same canvases within the same context will still get the exact same noise.
+* Its own RGBA values. These might be unknown if it depends on the GPU-specific rendering.
+* The RGBA values of a neighboring pixel. This preserves identical noise distribution for identical pixel regions. Furthermore, [scaling attacks](https://github.com/google/security-research/security/advisories/GHSA-24cm-69m9-fpw3) are rendered substantially more difficult and expensive due to the unpredictable nature of hashing and random neighbor selection.
 
-[If spec work is in progress, link to the PR or draft of the spec.]
+An optimization is made to the algorithm to reduce the overhead on large surfaces with the same pixel value, which can be compressed well without noise but would compress badly when noise is added. If the pixel value in the original canvas is an exact match, the exact same noise is applied to that pixel. As a result, the large surface will still be of the same value and thus compress well.
 
-[If you have more potential solutions in mind, add ## Potential Solution 2, 3, etc. sections.]
+## FAQs
 
-### How this solution would solve the use cases
+**Canvas noise on readback is breaking my application, what should I do?**
 
-[If there are a suite of interacting APIs, show how they work together to solve the use cases described.]
+Do you specifically need the GPU to render the contents? If not, you can consider switching using CPU rendering: set `willReadFrequently: true` when getting the context (see [MDN](https://developer.mozilla.org/en-US/docs/Web/API/HTMLCanvasElement/getContext#willreadfrequently)). Note that for canvases with frequent readbacks, or for canvases where only few operations are performed, it is typically faster to use the CPU for rendering.
+If it’s not possible to switch to CPU rendering, please [file a bug](https://issues.chromium.org/issues/new?component=1456351&title=%5BCanvas%20anti-FP%20breakage%5D&description=-%20Breaking%20Site:%20https:%2F%2Fwww.example.com%2F%0A-%20Platform:%20%0A-%20Version:%20%0A%0A-%20Screenshot%20%5Boptional%5D:%20%0A%0A-%20Observed%20behavior:%20%0A-%20Expected%20behavior:%20%0A&template=0) with Chromium; we are interested to understand your use-case.
 
-#### Use case 1
+## Security and privacy considerations
+The goal of canvas noising is to reduce information available through the Canvas API that can be used to re-identify the user across sites.
 
-[Description of the end-user scenario]
-
-```js
-// Sample code demonstrating how to use these APIs to address that scenario.
-```
-
-#### Use case 2
-
-[etc.]
-
-## Detailed design discussion
-
-### [Tricky design choice #1]
-
-[Talk through the tradeoffs in coming to the specific design point you want to make.]
-
-```js
-// Illustrated with example code.
-```
-
-[This may be an open question,
-in which case you should link to any active discussion threads.]
-
-### [Tricky design choice 2]
-
-[etc.]
-
-## Considered alternatives
-
-[This should include as many alternatives as you can,
-from high level architectural decisions down to alternative naming choices.]
-
-### [Alternative 1]
-
-[Describe an alternative which was considered,
-and why you decided against it.]
-
-### [Alternative 2]
-
-[etc.]
-
-## Stakeholder Feedback / Opposition
-
-[Implementors and other stakeholders may already have publicly stated positions on this work. If you can, list them here with links to evidence as appropriate.]
-
-- [Implementor A] : Positive
-- [Stakeholder B] : No signals
-- [Implementor C] : Negative
-
-[If appropriate, explain the reasons given by other implementors for their concerns.]
-
-## References & acknowledgements
-
-[Your design will change and be informed by many people; acknowledge them in an ongoing way! It helps build community and, as we only get by through the contributions of many, is only fair.]
-
-[Unless you have a specific reason not to, these should be in alphabetical order.]
-
-Many thanks for valuable feedback and advice from:
-
-- [Person 1]
-- [Person 2]
-- [etc.]
+The per-partition token should be considered site data, and thus should be removed whenever the user deletes data for a particular site. This prevents the token from being abused as a persistent identifier.
