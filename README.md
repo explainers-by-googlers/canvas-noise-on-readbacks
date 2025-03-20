@@ -108,6 +108,6 @@ Many thanks for valuable feedback and advice from:
 
 -   Artur Janc
 -   Brian Lefler
--   John Kim
+-   [John Kim](https://github.com/jkim-y)
 -   Mike Taylor
 -   Mike West
